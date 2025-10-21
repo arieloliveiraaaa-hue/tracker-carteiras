@@ -15,6 +15,7 @@ import streamlit as st
 import yfinance as yf
 from dateutil.relativedelta import relativedelta
 from datetime import datetime, date, timedelta
+from pathlib import Path
 
 # =============================
 # Configuração básica da página
@@ -49,6 +50,35 @@ BENCH_PRESETS = {
 }
 
 DATE_TZ = "America/Sao_Paulo"
+
+# =============================
+# Persistência simples em disco
+# =============================
+STATE_PATH = Path.home() / ".streamlit_carteiras_config.json"
+
+def _save_persisted_portfolios(portfolios_state: Dict[str, Portfolio]):
+    try:
+        data = {pid: p.to_dict() for pid, p in portfolios_state.items()}
+        STATE_PATH.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
+    except Exception:
+        # Evita quebrar o app por falha de gravação
+        pass
+
+def _load_persisted_portfolios() -> Dict[str, Portfolio] | None:
+    try:
+        if not STATE_PATH.exists():
+            return None
+        raw = json.loads(STATE_PATH.read_text(encoding="utf-8"))
+        loaded: Dict[str, Portfolio] = {}
+        for k, v in raw.items():
+            loaded[str(k)] = Portfolio(
+                name=v.get("name", f"Carteira {k}"),
+                tickers=v.get("tickers", []),
+                benchmark=v.get("benchmark", "^BVSP"),
+            )
+        return loaded
+    except Exception:
+        return None
 
 @dataclass
 class Portfolio:
@@ -183,10 +213,18 @@ DEFAULT_PORTS = [
 ]
 
 if "portfolios" not in st.session_state:
-    st.session_state.portfolios: Dict[str, Portfolio] = {
-        str(i+1): p for i, p in enumerate(DEFAULT_PORTS)
-    }
-    st.session_state.next_id = len(st.session_state.portfolios) + 1
+    persisted = _load_persisted_portfolios()
+    if persisted:
+        st.session_state.portfolios = persisted
+        try:
+            max_id = max(map(int, list(persisted.keys())))
+            st.session_state.next_id = max_id + 1
+        except Exception:
+            st.session_state.next_id = len(persisted) + 1
+    else:
+        st.session_state.portfolios: Dict[str, Portfolio] = {str(i+1): p for i, p in enumerate(DEFAULT_PORTS)}
+        st.session_state.next_id = len(st.session_state.portfolios) + 1
+
 
 # ======================
 # Sidebar – Configuração
@@ -222,12 +260,14 @@ with st.sidebar:
             benchmark="^BVSP",
         )
         st.session_state.next_id += 1
+        _save_persisted_portfolios(st.session_state.portfolios)
         st.rerun()
 
     del_id = st.text_input("ID para excluir", placeholder="ex.: 3")
     if st.button("🗑️ Excluir carteira", use_container_width=True) and del_id:
         if del_id in st.session_state.portfolios:
             st.session_state.portfolios.pop(del_id)
+            _save_persisted_portfolios(st.session_state.portfolios)
             st.rerun()
         else:
             st.warning("ID não encontrado.")
@@ -264,6 +304,7 @@ with st.sidebar:
             except Exception:
                 st.session_state.next_id = len(new_state) + 1
             st.success("Config carregada.")
+            _save_persisted_portfolios(st.session_state.portfolios)
         except Exception as e:
             st.error(f"Falha ao carregar JSON: {e}")
 
@@ -296,6 +337,7 @@ for (pid, portfolio), tab in zip(ordered, _tabs):
             new_name = st.text_input("Nome", value=portfolio.name, key=f"name_{pid}")
             if new_name != portfolio.name:
                 portfolio.name = new_name
+                _save_persisted_portfolios(st.session_state.portfolios)
 
             # Benchmark
             bench_sel = st.selectbox(
@@ -309,7 +351,10 @@ for (pid, portfolio), tab in zip(ordered, _tabs):
             )
             # Se usuário alterou manual, prioriza manual; senão usa preset
             bench_symbol = bench_custom.strip() if bench_custom.strip() else BENCH_PRESETS[bench_sel]
-            portfolio.benchmark = bench_symbol
+            old_bench = portfolio.benchmark
+            if bench_symbol != old_bench:
+                portfolio.benchmark = bench_symbol
+                _save_persisted_portfolios(st.session_state.portfolios)
 
             st.markdown("")
             st.markdown("**Ativos & Pesos (%)**")
@@ -333,6 +378,7 @@ for (pid, portfolio), tab in zip(ordered, _tabs):
             # Remove linhas vazias
             tick_rows = tick_rows[tick_rows["Ticker"].str.strip() != ""]
             portfolio.tickers = tick_rows.to_dict(orient="records")
+            _save_persisted_portfolios(st.session_state.portfolios)
 
         with colR:
             st.subheader("Resultados")
@@ -486,4 +532,3 @@ for (pid, portfolio), tab in zip(ordered, _tabs):
             )
 
 # Fim
-
