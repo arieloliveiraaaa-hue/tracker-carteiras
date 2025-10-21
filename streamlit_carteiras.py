@@ -380,7 +380,16 @@ for (pid, portfolio), tab in zip(ordered, _tabs):
             st.markdown("")
             st.markdown("**Ativos & Pesos (%)**")
             st.caption("Dica: você pode digitar 12,5 ou 12.5; também aceita '12%'.")
-            df_init = pd.DataFrame(portfolio.tickers or [{"Ticker": "", "Weight": 0.0}])
+            df_init = pd.DataFrame(portfolio.tickers or [{"Ticker": "", "Weight": 0.0}]).copy()
+            # Força dtype 'object'/string p/ permitir TextColumn + vírgula
+            if "Ticker" in df_init.columns:
+                df_init["Ticker"] = df_init["Ticker"].astype(str)
+            if "Weight" not in df_init.columns:
+                df_init["Weight"] = ""
+            else:
+                df_init["Weight"] = df_init["Weight"].apply(lambda x: "" if pd.isna(x) else str(x))
+            df_init["Weight"] = df_init["Weight"].astype(object)
+
             df_edit = st.data_editor(
                 df_init,
                 num_rows="dynamic",
