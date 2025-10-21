@@ -197,6 +197,27 @@ def build_port_index(price_df: pd.DataFrame, weights: pd.Series) -> pd.Series:
 def pct(x):
     return "-" if pd.isna(x) else f"{x*100:,.2f}%"
 
+# Aceita pesos com vírgula ("12,5"), ponto ("12.5") ou com símbolo "%" e faz bound 0..100
+def parse_weight(x) -> float:
+    if x is None or (isinstance(x, float) and np.isnan(x)):
+        return np.nan
+    s = str(x).strip().replace("%", "")
+    if not s:
+        return np.nan
+    s = s.replace(" ", "")
+    # Se possuir ponto e vírgula e a vírgula for o último separador, assume formato pt-BR (1.234,56)
+    if "," in s and "." in s and s.rfind(",") > s.rfind("."):
+        s = s.replace(".", "")
+        s = s.replace(",", ".")
+    else:
+        s = s.replace(",", ".")
+    try:
+        val = float(s)
+    except Exception:
+        return np.nan
+    # Limita 0..100 (%); mantém como porcentagem (não fração)
+    return float(max(0.0, min(100.0, val)))
+
 # ==========================
 # Estado inicial (4 carteiras)
 # ==========================
@@ -358,6 +379,7 @@ for (pid, portfolio), tab in zip(ordered, _tabs):
 
             st.markdown("")
             st.markdown("**Ativos & Pesos (%)**")
+            st.caption("Dica: você pode digitar 12,5 ou 12.5; também aceita '12%'.")
             df_init = pd.DataFrame(portfolio.tickers or [{"Ticker": "", "Weight": 0.0}])
             df_edit = st.data_editor(
                 df_init,
@@ -366,14 +388,14 @@ for (pid, portfolio), tab in zip(ordered, _tabs):
                 key=f"edit_{pid}",
                 column_config={
                     "Ticker": st.column_config.TextColumn("Ticker", help="Ex.: VIVT3, TOTS3, AAPL, BOVA11.SA"),
-                    "Weight": st.column_config.NumberColumn("Weight (%)", min_value=0.0, max_value=100.0, step=1.0),
+                    "Weight": st.column_config.TextColumn("Weight (%)", help="Use vírgula ou ponto; aceita 12,5, 12.5 ou 12%"),
                 },
                 hide_index=True,
             )
             # Persistência local
             tick_rows = (
                 df_edit.assign(Ticker=lambda d: d["Ticker"].fillna("").astype(str).str.upper())
-                      .assign(Weight=lambda d: pd.to_numeric(d["Weight"], errors="coerce"))
+                      .assign(Weight=lambda d: d["Weight"].apply(parse_weight))
             )
             # Remove linhas vazias
             tick_rows = tick_rows[tick_rows["Ticker"].str.strip() != ""]
