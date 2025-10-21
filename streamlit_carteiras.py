@@ -187,7 +187,7 @@ def build_port_index(price_df: pd.DataFrame, weights: pd.Series) -> pd.Series:
     if w.isna().all() or w.sum() == 0:
         w = pd.Series(np.repeat(1.0, len(w)), index=w.index)
     w = w / w.sum()
-    rets = price_df.pct_change().fillna(0.0)
+    rets = price_df.pct_change(fill_method=None).fillna(0.0)
     port_ret = (rets[w.index] * w).sum(axis=1)
     idx = (1.0 + port_ret).cumprod() * 100.0
     return idx
@@ -506,17 +506,6 @@ for (pid, portfolio), tab in zip(ordered, _tabs):
             fmt_tbl = tbl.copy()
             for c in ["Dia", "MTD", "YTD", "12M"]:
                 fmt_tbl[c] = fmt_tbl[c].apply(pct)
-
-            
-            # Botão para baixar CSV bruto de variações (números)
-            st.download_button(
-                "⬇️ Baixar tabela (CSV)",
-                data=tbl.to_csv(index=False).encode("utf-8"),
-                file_name=f"variacoes_{portfolio.name.replace(' ', '_')}.csv",
-                mime="text/csv",
-                use_container_width=True,
-                key=f"dl_{pid}",
-            )
 
             # =====================
             # Gráfico – base 100
