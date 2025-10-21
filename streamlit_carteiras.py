@@ -76,24 +76,49 @@ def map_to_yahoo(t: str) -> str:
 # Cache de preços
 @st.cache_data(show_spinner=False, ttl=600)
 def get_prices(tickers: List[str], start: date) -> pd.DataFrame:
-    # Remove vazios/duplicados
+    """Baixa preços com yfinance e retorna um DataFrame de closes (1 coluna por ticker).
+    Observação: com auto_adjust=True, o yfinance não entrega 'Adj Close'; o 'Close' já vem ajustado.
+    """
+    # Remove vazios/duplicados e normaliza símbolos
     syms = sorted(set([map_to_yahoo(x) for x in tickers if str(x).strip()]))
     if not syms:
         return pd.DataFrame()
+
     df = yf.download(
         tickers=syms,
         start=start,
         progress=False,
-        auto_adjust=True,
+        auto_adjust=True,  # 'Close' já ajustado; 'Adj Close' não existe neste modo
         group_by="ticker",
         threads=True,
         interval="1d",
     )
-    # Normaliza para colunas simples (Adj Close por ticker)
+
+    # Normaliza para colunas simples (Close por ticker)
     if isinstance(df.columns, pd.MultiIndex):
-        closes = pd.concat({sym: df[sym]["Adj Close"] for sym in syms}, axis=1)
+        # Tenta usar 'Close'; se não houver, tenta 'Adj Close'; senão, usa a primeira coluna disponível
+        lvl1 = df.columns.get_level_values(1)
+        if "Close" in set(lvl1):
+            closes = pd.concat({sym: df[sym]["Close"] for sym in syms if sym in df.columns.levels[0]}, axis=1)
+        elif "Adj Close" in set(lvl1):
+            closes = pd.concat({sym: df[sym]["Adj Close"] for sym in syms if sym in df.columns.levels[0]}, axis=1)
+        else:
+            first_metric = lvl1.unique().tolist()[0]
+            closes = pd.concat({sym: df[sym][first_metric] for sym in syms if sym in df.columns.levels[0]}, axis=1)
     else:
-        closes = df[["Adj Close"]].rename(columns={"Adj Close": syms[0]})
+        # Single ticker: colunas simples
+        cols = df.columns.tolist()
+        if "Close" in cols:
+            closes = df[["Close"]].rename(columns={"Close": syms[0]})
+        elif "Adj Close" in cols:
+            closes = df[["Adj Close"]].rename(columns={"Adj Close": syms[0]})
+        else:
+            # fallback: pega a última coluna numérica
+            num_cols = [c for c in cols if pd.api.types.is_numeric_dtype(df[c])]
+            if not num_cols:
+                return pd.DataFrame()
+            closes = df[[num_cols[-1]]].rename(columns={num_cols[-1]: syms[0]})
+
     closes.index = pd.to_datetime(closes.index)
     closes = closes.sort_index().dropna(how="all")
     return closes
