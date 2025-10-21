@@ -56,7 +56,7 @@ DATE_TZ = "America/Sao_Paulo"
 # =============================
 STATE_PATH = Path.home() / ".streamlit_carteiras_config.json"
 
-def _save_persisted_portfolios(portfolios_state: Dict[str, Portfolio]):
+def _save_persisted_portfolios(portfolios_state: Dict[str, "Portfolio"]):
     try:
         data = {pid: p.to_dict() for pid, p in portfolios_state.items()}
         STATE_PATH.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
@@ -64,7 +64,7 @@ def _save_persisted_portfolios(portfolios_state: Dict[str, Portfolio]):
         # Evita quebrar o app por falha de gravação
         pass
 
-def _load_persisted_portfolios() -> Dict[str, Portfolio] | None:
+def _load_persisted_portfolios() -> Dict[str, "Portfolio"] | None:
     try:
         if not STATE_PATH.exists():
             return None
