@@ -252,6 +252,15 @@ if "portfolios" not in st.session_state:
 # ======================
 with st.sidebar:
     st.header("⚙️ Configurações")
+
+    # Logo: caminho local no repo ou URL absoluta
+    logo_src = st.text_input(
+        "Logo (caminho ou URL)",
+        value=st.session_state.get("logo_src", "assets/icone_completo_2022_fundo_titanio.png"),
+        help="Ex.: assets/logo.png dentro do repo, ou uma URL (PNG/SVG/JPG).",
+    )
+    st.session_state.logo_src = logo_src
+    st.markdown("---")
     # Período do gráfico (lookback)
     lookback = st.selectbox(
         "Período do gráfico",
@@ -298,14 +307,7 @@ with st.sidebar:
     # Exportar / importar configuração
     if st.session_state.portfolios:
         export = {pid: p.to_dict() for pid, p in st.session_state.portfolios.items()}
-        st.download_button(
-            "💾 Baixar configuração (JSON)",
-            data=json.dumps(export, ensure_ascii=False, indent=2).encode("utf-8"),
-            file_name="carteiras_config.json",
-            mime="application/json",
-            use_container_width=True,
-        )
-
+        
     up = st.file_uploader("Carregar configuração JSON", type=["json"])
     if up is not None:
         try:
@@ -333,8 +335,19 @@ with st.sidebar:
 # Main – Abas por carteira
 # ======================
 
-st.title("📊 Monitor de Carteiras Recomendadas")
-st.caption("Edite tickers, pesos, benchmark, e acompanhe variações (Dia, MTD, YTD, 12M) com gráfico base-100.")
+# Cabeçalho com logo + título
+header_c1, header_c2 = st.columns([0.22, 1.78])
+with header_c1:
+    try:
+        if "logo_bytes" in st.session_state and st.session_state.logo_bytes:
+            st.image(st.session_state.logo_bytes, use_container_width=True)
+        else:
+            st.image(st.session_state.get("logo_src", "assets/icone_completo_2022_fundo_titanio.png"), use_container_width=True)
+    except Exception:
+        pass
+with header_c2:
+    st.title("📊 Monitor de Carteiras Recomendadas")
+    st.caption("Edite tickers, pesos, benchmark e acompanhe variações (Dia, MTD, YTD, 12M) com gráfico base-100.")
 
 if not st.session_state.portfolios:
     st.info("Nenhuma carteira. Adicione uma pela barra lateral.")
@@ -494,12 +507,7 @@ for (pid, portfolio), tab in zip(ordered, _tabs):
             for c in ["Dia", "MTD", "YTD", "12M"]:
                 fmt_tbl[c] = fmt_tbl[c].apply(pct)
 
-            st.dataframe(
-                fmt_tbl,
-                use_container_width=True,
-                hide_index=True,
-            )
-
+            
             # Botão para baixar CSV bruto de variações (números)
             st.download_button(
                 "⬇️ Baixar tabela (CSV)",
@@ -512,40 +520,70 @@ for (pid, portfolio), tab in zip(ordered, _tabs):
             # =====================
             # Gráfico – base 100
             # =====================
-            if lookback == "3M":
-                start_g = today - relativedelta(months=3)
-            elif lookback == "6M":
-                start_g = today - relativedelta(months=6)
-            elif lookback == "12M":
-                start_g = today - relativedelta(years=1)
-            elif lookback == "24M":
-                start_g = today - relativedelta(years=2)
-            elif lookback == "YTD":
-                start_g = start_ytd
-            else:
-                start_g = price_df.index.date.min() if len(price_df) else today - relativedelta(years=2)
+            st.subheader("Gráfico (base 100)")
 
-            # Rebase 100 no início da janela
-            def rebase_100(series: pd.Series, start_date: date) -> pd.Series:
+            # Seleção de período: presets ou personalizado
+            mode = st.radio("Período do gráfico", ["Presets", "Personalizado"], horizontal=True, key=f"mode_{pid}")
+
+            if mode == "Presets":
+                preset = st.selectbox("Presets", ["3M", "6M", "12M", "YTD", "24M", "MAX"], index=2, key=f"preset_{pid}")
+                if preset == "3M":
+                    start_g = today - relativedelta(months=3)
+                    end_g = today
+                elif preset == "6M":
+                    start_g = today - relativedelta(months=6)
+                    end_g = today
+                elif preset == "12M":
+                    start_g = today - relativedelta(years=1)
+                    end_g = today
+                elif preset == "24M":
+                    start_g = today - relativedelta(years=2)
+                    end_g = today
+                elif preset == "YTD":
+                    start_g = start_ytd
+                    end_g = today
+                else:
+                    start_g = price_df.index.date.min() if len(price_df) else today - relativedelta(years=2)
+                    end_g = price_df.index.date.max() if len(price_df) else today
+            else:
+                min_d = price_df.index.date.min()
+                max_d = price_df.index.date.max()
+                default_start = max(min_d, today - relativedelta(months=6))
+                dr = st.date_input(
+                    "Intervalo personalizado",
+                    value=(default_start, max_d),
+                    min_value=min_d,
+                    max_value=max_d,
+                    key=f"daterange_{pid}"
+                )
+                if isinstance(dr, tuple) and len(dr) == 2:
+                    start_g, end_g = dr
+                else:
+                    start_g, end_g = default_start, max_d
+
+            # Rebase 100 na janela
+            def rebase_100(series: pd.Series, start_date: date, end_date: date | None = None) -> pd.Series:
                 s = series.dropna()
-                s = s[s.index.date >= start_date]
+                if end_date is None:
+                    end_date = s.index.date.max() if len(s) else start_date
+                mask = (s.index.date >= start_date) & (s.index.date <= end_date)
+                s = s[mask]
                 if s.empty:
                     return s
                 return (s / s.iloc[0]) * 100.0
 
-            port_g = rebase_100(port_idx, start_g)
-            bench_g = rebase_100(px_bench, start_g)
+            port_g = rebase_100(port_idx, start_g, end_g)
+            bench_g = rebase_100(px_bench, start_g, end_g)
 
             fig = go.Figure()
             fig.add_trace(go.Scatter(x=port_g.index, y=port_g, mode="lines", name=f"{portfolio.name}"))
             fig.add_trace(go.Scatter(x=bench_g.index, y=bench_g, mode="lines", name=f"Benchmark [{bench_sym}]"))
 
-            # Opcional: mostrar também os componentes (toggle)
             with st.expander("Opções do gráfico"):
                 show_components = st.checkbox("Mostrar componentes da carteira", value=False, key=f"showc_{pid}")
                 if show_components:
                     for sym in used_syms:
-                        comp_idx = rebase_100(px_assets[sym], start_g)
+                        comp_idx = rebase_100(px_assets[sym], start_g, end_g)
                         fig.add_trace(go.Scatter(x=comp_idx.index, y=comp_idx, mode="lines", name=sym, line=dict(width=1)))
 
             fig.update_layout(
@@ -556,6 +594,21 @@ for (pid, portfolio), tab in zip(ordered, _tabs):
                 xaxis_title="Data",
             )
             st.plotly_chart(fig, use_container_width=True)
+
+            # Tabela abaixo do gráfico
+            st.subheader("Tabela de variações")
+            st.dataframe(
+                fmt_tbl,
+                use_container_width=True,
+                hide_index=True,
+            )
+            st.download_button(
+                "⬇️ Baixar tabela (CSV)",
+                data=tbl.to_csv(index=False).encode("utf-8"),
+                file_name=f"variacoes_{portfolio.name.replace(' ', '_')}.csv",
+                mime="text/csv",
+                use_container_width=True,
+            )
 
             st.markdown(
                 "<span class='small'>Dica: para B3, digite o ticker sem sufixo (ex.: **VIVT3**) – adicionamos `.SA` automaticamente. Benchmarks aceitam índices do Yahoo (ex.: **^BVSP**, **^GSPC**) e moedas (ex.: **USDBRL=X**).</span>",
