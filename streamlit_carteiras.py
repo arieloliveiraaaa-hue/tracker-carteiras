@@ -209,21 +209,26 @@ with st.sidebar:
     st.markdown("---")
 
     # Adicionar/excluir carteiras
+    # Entrada de nome customizado para nova carteira
+    new_port_default = f"Carteira {st.session_state.next_id}"
+    new_port_name = st.text_input("Nome da nova carteira", value=new_port_default, key="new_port_name")
+
     if st.button("➕ Adicionar carteira", use_container_width=True):
         new_id = str(st.session_state.next_id)
+        name_to_use = st.session_state.get("new_port_name", new_port_default) or new_port_default
         st.session_state.portfolios[new_id] = Portfolio(
-            name=f"Carteira {new_id}",
+            name=name_to_use.strip(),
             tickers=[{"Ticker": "", "Weight": 0.0}],
             benchmark="^BVSP",
         )
         st.session_state.next_id += 1
-        st.experimental_rerun()
+        st.rerun()
 
     del_id = st.text_input("ID para excluir", placeholder="ex.: 3")
     if st.button("🗑️ Excluir carteira", use_container_width=True) and del_id:
         if del_id in st.session_state.portfolios:
             st.session_state.portfolios.pop(del_id)
-            st.experimental_rerun()
+            st.rerun()
         else:
             st.warning("ID não encontrado.")
 
@@ -481,3 +486,4 @@ for (pid, portfolio), tab in zip(ordered, _tabs):
             )
 
 # Fim
+
