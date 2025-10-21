@@ -515,6 +515,7 @@ for (pid, portfolio), tab in zip(ordered, _tabs):
                 file_name=f"variacoes_{portfolio.name.replace(' ', '_')}.csv",
                 mime="text/csv",
                 use_container_width=True,
+                key=f"dl_{pid}",
             )
 
             # =====================
@@ -608,6 +609,7 @@ for (pid, portfolio), tab in zip(ordered, _tabs):
                 file_name=f"variacoes_{portfolio.name.replace(' ', '_')}.csv",
                 mime="text/csv",
                 use_container_width=True,
+                key=f"dl_{pid}",
             )
 
             st.markdown(
