@@ -62,51 +62,6 @@ DATE_TZ = "America/Sao_Paulo"
 # =============================
 STATE_PATH = Path.home() / ".streamlit_carteiras_config.json"
 
-def _save_persisted_portfolios(portfolios_state: Dict[str, "Portfolio"]):
-    try:
-        data = {pid: p.to_dict() for pid, p in portfolios_state.items()}
-        payload = {
-            "portfolios": data,
-            "_meta": {
-                "logo_src": st.session_state.get("logo_src", "assets/icone_completo_2022_fundo_titanio.png"),
-                "config_url": st.session_state.get("config_url", ""),
-            },
-        }
-        STATE_PATH.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
-    except Exception:
-        pass
-
-def _load_persisted_portfolios() -> Dict[str, "Portfolio"] | None:
-    try:
-        if not STATE_PATH.exists():
-            return None
-        raw_text = STATE_PATH.read_text(encoding="utf-8")
-        if not raw_text.strip():
-            return None
-        raw = json.loads(raw_text)
-
-        if isinstance(raw, dict) and "portfolios" in raw:
-            raw_ports = raw.get("portfolios", {})
-            meta = raw.get("_meta", {})
-            if isinstance(meta, dict):
-                if meta.get("logo_src"):
-                    st.session_state.logo_src = meta.get("logo_src")
-                if meta.get("config_url") is not None:
-                    st.session_state.config_url = meta.get("config_url")
-        else:
-            raw_ports = raw
-
-        loaded: Dict[str, Portfolio] = {}
-        for k, v in raw_ports.items():
-            loaded[str(k)] = Portfolio(
-                name=v.get("name", f"Carteira {k}"),
-                tickers=v.get("tickers", []),
-                benchmark=v.get("benchmark", "^BVSP"),
-            )
-        return loaded
-    except Exception:
-        return None
-
 # =============================
 # Config remota (GitHub Raw / Gist / URL pública JSON)
 # =============================
@@ -181,6 +136,55 @@ class Portfolio:
 
     def to_dict(self):
         return asdict(self)
+
+# =============================
+# Persistência simples em disco (redefinida, limpa)
+# =============================
+
+def _save_persisted_portfolios(portfolios_state: Dict[str, Portfolio]) -> None:
+    """Salva carteiras/localmente (arquivo JSON na home)."""
+    try:
+        data = {pid: p.to_dict() for pid, p in portfolios_state.items()}
+        payload = {
+            "portfolios": data,
+            "_meta": {
+                "logo_src": st.session_state.get("logo_src", "assets/icone_completo_2022_fundo_titanio.png"),
+                "config_url": st.session_state.get("config_url", ""),
+            },
+        }
+        STATE_PATH.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
+    except Exception:
+        pass
+
+def _load_persisted_portfolios() -> Dict[str, Portfolio] | None:
+    """Carrega carteiras do JSON local. Retorna None se não existir/der erro."""
+    try:
+        if not STATE_PATH.exists():
+            return None
+        raw_text = STATE_PATH.read_text(encoding="utf-8")
+        if not raw_text.strip():
+            return None
+        obj = json.loads(raw_text)
+
+        if isinstance(obj, dict) and "portfolios" in obj:
+            ports = obj.get("portfolios", {})
+            meta = obj.get("_meta", {})
+            if isinstance(meta, dict):
+                st.session_state.logo_src = meta.get("logo_src", st.session_state.get("logo_src", "assets/icone_completo_2022_fundo_titanio.png"))
+                st.session_state.config_url = meta.get("config_url", st.session_state.get("config_url", ""))
+        else:
+            ports = obj
+
+        loaded: Dict[str, Portfolio] = {}
+        for k, v in ports.items():
+            loaded[str(k)] = Portfolio(
+                name=v.get("name", f"Carteira {k}"),
+                tickers=v.get("tickers", []),
+                benchmark=v.get("benchmark", "^BVSP"),
+            )
+        return loaded
+    except Exception:
+        return None
 
 # Mapeia ticker bruto para Yahoo Finance (regra simples p/ B3)
 def map_to_yahoo(t: str) -> str:
