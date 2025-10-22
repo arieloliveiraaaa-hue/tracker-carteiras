@@ -6,7 +6,7 @@
 import re
 import json
 from dataclasses import dataclass, asdict
-from typing import Dict, List, Tuple
+from typing import Dict, List, Tuple, Optional
 
 import numpy as np
 import pandas as pd
@@ -61,6 +61,66 @@ DATE_TZ = "America/Sao_Paulo"
 # Persistência simples em disco
 # =============================
 STATE_PATH = Path.home() / ".streamlit_carteiras_config.json"
+
+# =============================
+# Persistência simples em disco (limpa e consistente)
+# =============================
+
+def _save_persisted_portfolios(portfolios_state: Dict[str, Portfolio]) -> None:
+    """Salva carteiras/localmente (arquivo JSON na home)."""
+    try:
+        data = {pid: p.to_dict() for pid, p in portfolios_state.items()}
+        payload = {
+            "portfolios": data,
+            "_meta": {
+                "logo_src": st.session_state.get("logo_src", "assets/icone_completo_2022_fundo_titanio.png"),
+                "config_url": st.session_state.get("config_url", ""),
+            },
+        }
+        STATE_PATH.write_text(
+            json.dumps(payload, ensure_ascii=False, indent=2),
+            encoding="utf-8",
+        )
+    except Exception:
+        # Nunca quebrar o app por erro de IO
+        pass
+
+def _load_persisted_portfolios() -> Optional[Dict[str, Portfolio]]:
+    """Carrega carteiras do JSON local. Retorna None se não existir/der erro."""
+    try:
+        if not STATE_PATH.exists():
+            return None
+        raw_text = STATE_PATH.read_text(encoding="utf-8")
+        if not raw_text.strip():
+            return None
+        obj = json.loads(raw_text)
+
+        # Suporta formato antigo (dict direto) e novo (com 'portfolios' + '_meta')
+        if isinstance(obj, dict) and "portfolios" in obj:
+            ports = obj.get("portfolios", {})
+            meta = obj.get("_meta", {})
+            if isinstance(meta, dict):
+                st.session_state["logo_src"] = meta.get(
+                    "logo_src",
+                    st.session_state.get("logo_src", "assets/icone_completo_2022_fundo_titanio.png"),
+                )
+                st.session_state["config_url"] = meta.get(
+                    "config_url",
+                    st.session_state.get("config_url", ""),
+                )
+        else:
+            ports = obj
+
+        loaded: Dict[str, Portfolio] = {}
+        for k, v in (ports or {}).items():
+            loaded[str(k)] = Portfolio(
+                name=v.get("name", f"Carteira {k}"),
+                tickers=v.get("tickers", []),
+                benchmark=v.get("benchmark", "^BVSP"),
+            )
+        return loaded
+    except Exception:
+        return None
 
 # =============================
 # Config remota (GitHub Raw / Gist / URL pública JSON)
@@ -131,7 +191,7 @@ def _get_config_url_from_env_or_query() -> str | None:
 @dataclass
 class Portfolio:
     name: str
-    tickers: List[Dict]  # [{"Ticker":"VIVT3", "Weight": 25.0}, ...]
+    tickers: List[Dict]  # [{"Ticker": "VIVT3", "Weight": 25.0}, ...]
     benchmark: str
 
     def to_dict(self):
