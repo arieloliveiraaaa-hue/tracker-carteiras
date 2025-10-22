@@ -144,7 +144,7 @@ def get_prices(tickers: List[str], start: date) -> pd.DataFrame:
 
 
 def _period_return(series: pd.Series, start_date: date) -> float:
-    s = (series or pd.Series(dtype=float)).dropna()
+    s = (series if series is not None else pd.Series(dtype=float)).dropna()
     s = s[s.index.date >= start_date]
     if len(s) < 2:
         return np.nan
@@ -152,14 +152,14 @@ def _period_return(series: pd.Series, start_date: date) -> float:
 
 
 def _daily_return(series: pd.Series) -> float:
-    s = (series or pd.Series(dtype=float)).dropna()
+    s = (series if series is not None else pd.Series(dtype=float)).dropna()
     if len(s) < 2:
         return np.nan
     return float(s.iloc[-1] / s.iloc[-2] - 1.0)
 
 
 def build_port_index(price_df: pd.DataFrame, weights: pd.Series) -> pd.Series:
-    w = (weights or pd.Series(dtype=float)).astype(float)
+    w = (weights if weights is not None else pd.Series(dtype=float)).astype(float)
     if w.isna().all() or w.sum() == 0:
         w = pd.Series(np.repeat(1.0, len(price_df.columns)), index=price_df.columns)
     w = w / w.sum()
@@ -400,7 +400,7 @@ with st.sidebar:
 col_logo, col_title = st.columns([0.22, 1.78])
 with col_logo:
     try:
-        st.image(st.session_state.get("logo_src", LOGO_DEFAULT), use_container_width=True)
+        st.image(st.session_state.get("logo_src", LOGO_DEFAULT), width='stretch')
     except Exception:
         pass
 with col_title:
@@ -600,11 +600,11 @@ for (pid, portfolio), tab in zip(ordered, _tabs):
                         comp_idx = rebase_100(px_assets[sym], start_g, end_g)
                         fig.add_trace(go.Scatter(x=comp_idx.index, y=comp_idx, mode="lines", name=sym, line=dict(width=1)))
             fig.update_layout(height=420, margin=dict(l=10, r=10, t=10, b=10), legend=dict(orientation="h", y=1.02, x=1, xanchor="right", yanchor="bottom"), yaxis_title="Base 100", xaxis_title="Data")
-            st.plotly_chart(fig, use_container_width=True)
+            st.plotly_chart(fig, width='stretch')
 
             # ===================== Tabela (abaixo) =====================
             st.subheader("Tabela de variações")
-            st.dataframe(fmt_tbl, hide_index=True, use_container_width=True)
+            st.dataframe(fmt_tbl, hide_index=True, width='stretch')
             st.download_button(
                 "⬇️ Baixar tabela (CSV)",
                 data=tbl.to_csv(index=False).encode("utf-8"),
