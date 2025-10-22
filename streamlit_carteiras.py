@@ -161,7 +161,7 @@ def _get_config_url_from_env_or_query() -> str | None:
         except Exception:
             pass
     return None
-        raw = json.loads(STATE_PATH.read_text(encoding="utf-8"))
+        
         loaded: Dict[str, Portfolio] = {}
         for k, v in raw.items():
             loaded[str(k)] = Portfolio(
