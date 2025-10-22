@@ -15,6 +15,12 @@ import streamlit as st
 import yfinance as yf
 from dateutil.relativedelta import relativedelta
 from datetime import datetime, date, timedelta
+
+# HTTP opcional para carregar config remota
+try:
+    import requests  # adicione 'requests' ao requirements.txt
+except Exception:  # fallback quando não instalado
+    requests = None
 from pathlib import Path
 
 # =============================
@@ -59,15 +65,98 @@ STATE_PATH = Path.home() / ".streamlit_carteiras_config.json"
 def _save_persisted_portfolios(portfolios_state: Dict[str, "Portfolio"]):
     try:
         data = {pid: p.to_dict() for pid, p in portfolios_state.items()}
-        STATE_PATH.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
+        payload = {
+            "portfolios": data,
+            "_meta": {
+                "logo_src": st.session_state.get("logo_src", "assets/icone_completo_2022_fundo_titanio.png"),
+                "config_url": st.session_state.get("config_url", ""),
+            },
+        }
+        STATE_PATH.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
     except Exception:
-        # Evita quebrar o app por falha de gravação
         pass
 
 def _load_persisted_portfolios() -> Dict[str, "Portfolio"] | None:
     try:
         if not STATE_PATH.exists():
             return None
+        raw = json.loads(STATE_PATH.read_text(encoding="utf-8"))
+        if isinstance(raw, dict) and "portfolios" in raw:
+            raw_ports = raw.get("portfolios", {})
+            meta = raw.get("_meta", {})
+            logo_src = meta.get("logo_src")
+            config_url = meta.get("config_url")
+            if logo_src:
+                st.session_state.logo_src = logo_src
+            if config_url:
+                st.session_state.config_url = config_url
+        else:
+            raw_ports = raw
+        loaded: Dict[str, Portfolio] = {}
+        for k, v in raw_ports.items():
+            loaded[str(k)] = Portfolio(
+                name=v.get("name", f"Carteira {k}"),
+                tickers=v.get("tickers", []),
+                benchmark=v.get("benchmark", "^BVSP"),
+            )
+        return loaded
+    except Exception:
+        return None
+
+# =============================
+# Config remota (GitHub Raw / Gist / URL pública JSON)
+# =============================
+
+def _fetch_remote_config(url: str) -> Dict[str, "Portfolio"] | None:
+    if not url:
+        return None
+    try:
+        if requests is None:
+            st.warning("Para carregar configuração remota, adicione 'requests' ao requirements.txt")
+            return None
+        r = requests.get(url, timeout=10)
+        if not r.ok:
+            return None
+        raw = r.json()
+        # Formato com 'portfolios' ou dict direto
+        raw_ports = raw.get("portfolios", raw)
+        loaded: Dict[str, Portfolio] = {}
+        for k, v in raw_ports.items():
+            loaded[str(k)] = Portfolio(
+                name=v.get("name", f"Carteira {k}"),
+                tickers=v.get("tickers", []),
+                benchmark=v.get("benchmark", "^BVSP"),
+            )
+        # meta opcional
+        meta = raw.get("_meta", {}) if isinstance(raw, dict) else {}
+        if meta.get("logo_src"):
+            st.session_state.logo_src = meta.get("logo_src")
+        return loaded
+    except Exception:
+        return None
+
+def _get_config_url_from_env_or_query() -> str | None:
+    # 1) secrets
+    try:
+        if "CONFIG_URL" in st.secrets:
+            return st.secrets["CONFIG_URL"]
+    except Exception:
+        pass
+    # 2) query param (?config=URL)
+    try:
+        qp = st.query_params
+        if "config" in qp:
+            v = qp.get("config")
+            return v if isinstance(v, str) else (v[0] if isinstance(v, list) and v else None)
+    except Exception:
+        try:
+            qp = st.experimental_get_query_params()
+            if "config" in qp:
+                arr = qp.get("config")
+                return arr[0] if isinstance(arr, list) and arr else None
+        except Exception:
+            pass
+    return None
         raw = json.loads(STATE_PATH.read_text(encoding="utf-8"))
         loaded: Dict[str, Portfolio] = {}
         for k, v in raw.items():
@@ -234,17 +323,44 @@ DEFAULT_PORTS = [
 ]
 
 if "portfolios" not in st.session_state:
-    persisted = _load_persisted_portfolios()
-    if persisted:
-        st.session_state.portfolios = persisted
-        try:
-            max_id = max(map(int, list(persisted.keys())))
-            st.session_state.next_id = max_id + 1
-        except Exception:
-            st.session_state.next_id = len(persisted) + 1
+    # 1) query/secrets -> URL remota
+    config_env_url = _get_config_url_from_env_or_query()
+    if config_env_url:
+        remote = _fetch_remote_config(config_env_url)
+        if remote:
+            st.session_state.portfolios = remote
+            try:
+                max_id = max(map(int, list(remote.keys())))
+                st.session_state.next_id = max_id + 1
+            except Exception:
+                st.session_state.next_id = len(remote) + 1
+            st.session_state.config_url = config_env_url
+        else:
+            # 2) persistido local
+            persisted = _load_persisted_portfolios()
+            if persisted:
+                st.session_state.portfolios = persisted
+                try:
+                    max_id = max(map(int, list(persisted.keys())))
+                    st.session_state.next_id = max_id + 1
+                except Exception:
+                    st.session_state.next_id = len(persisted) + 1
+            else:
+                st.session_state.portfolios = {str(i+1): p for i, p in enumerate(DEFAULT_PORTS)}
+                st.session_state.next_id = len(st.session_state.portfolios) + 1
     else:
-        st.session_state.portfolios: Dict[str, Portfolio] = {str(i+1): p for i, p in enumerate(DEFAULT_PORTS)}
-        st.session_state.next_id = len(st.session_state.portfolios) + 1
+        # 2) persistido local
+        persisted = _load_persisted_portfolios()
+        if persisted:
+            st.session_state.portfolios = persisted
+            try:
+                max_id = max(map(int, list(persisted.keys())))
+                st.session_state.next_id = max_id + 1
+            except Exception:
+                st.session_state.next_id = len(persisted) + 1
+        else:
+            st.session_state.portfolios = {str(i+1): p for i, p in enumerate(DEFAULT_PORTS)}
+            st.session_state.next_id = len(st.session_state.portfolios) + 1
 
 
 # ======================
@@ -258,8 +374,33 @@ with st.sidebar:
         "Logo (caminho ou URL)",
         value=st.session_state.get("logo_src", "assets/icone_completo_2022_fundo_titanio.png"),
         help="Ex.: assets/logo.png dentro do repo, ou uma URL (PNG/SVG/JPG).",
+        key="logo_src_input",
     )
     st.session_state.logo_src = logo_src
+
+    # Config remota (opcional)
+    config_url = st.text_input(
+        "Config remota (URL RAW do JSON)",
+        value=st.session_state.get("config_url", ""),
+        help="Cole aqui a URL RAW do JSON no GitHub/Gist. Use ?config=URL no link para autocarregar.",
+        key="config_url_input",
+    )
+    st.session_state.config_url = config_url
+    load_remote_btn = st.button("↻ Carregar desta URL", use_container_width=True)
+    if load_remote_btn and config_url:
+        remote = _fetch_remote_config(config_url)
+        if remote:
+            st.session_state.portfolios = remote
+            try:
+                max_id = max(map(int, list(remote.keys())))
+                st.session_state.next_id = max_id + 1
+            except Exception:
+                st.session_state.next_id = len(remote) + 1
+            _save_persisted_portfolios(st.session_state.portfolios)
+            st.rerun()
+        else:
+            st.warning("Não foi possível carregar a URL fornecida.")
+
     st.markdown("---")
     # Período do gráfico (lookback)
     lookback = st.selectbox(
@@ -360,7 +501,8 @@ labels = [f"#{pid} – {p.name}" for pid, p in ordered]
 _tabs = st.tabs(labels)
 
 # Janela mínima para obter 12M/YTD (baixa mais dados para robustez)
-start_download = date.today() - relativedelta(years=2)
+# Baixa histórico completo por padrão (melhor para preset MAX)
+start_download = date(1990, 1, 1)
 
 for (pid, portfolio), tab in zip(ordered, _tabs):
     with tab:
@@ -598,7 +740,7 @@ for (pid, portfolio), tab in zip(ordered, _tabs):
                 file_name=f"variacoes_{portfolio.name.replace(' ', '_')}.csv",
                 mime="text/csv",
                 use_container_width=True,
-                key=f"dl_{pid}",
+                key=f"dl_{pid}_{abs(hash(portfolio.name))}",
             )
 
             st.markdown(
