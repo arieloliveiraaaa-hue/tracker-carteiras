@@ -678,7 +678,23 @@ for (pid, portfolio), tab in zip(ordered, _tabs):
                 elif preset == "YTD":
                     start_g = start_ytd
                     end_g = today
+                elif preset == "MAX":
+                    # Pega o maior entre os primeiros dados válidos (garante interseção não nula)
+                    starts = []
+                    for sym in used_syms:
+                        s = px_assets[sym].dropna()
+                        if not s.empty:
+                            starts.append(s.index[0].date())
+                    sb = px_bench.dropna()
+                    if not sb.empty:
+                        starts.append(sb.index[0].date())
+                    if starts:
+                        start_g = max(starts)
+                    else:
+                        start_g = price_df.index.date.min() if len(price_df) else today
+                    end_g = price_df.index.date.max() if len(price_df) else today
                 else:
+                    # Fallback
                     start_g = price_df.index.date.min() if len(price_df) else today - relativedelta(years=2)
                     end_g = price_df.index.date.max() if len(price_df) else today
             else:
