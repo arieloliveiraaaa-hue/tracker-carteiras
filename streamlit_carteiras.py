@@ -80,18 +80,22 @@ def _load_persisted_portfolios() -> Dict[str, "Portfolio"] | None:
     try:
         if not STATE_PATH.exists():
             return None
-        raw = json.loads(STATE_PATH.read_text(encoding="utf-8"))
+        raw_text = STATE_PATH.read_text(encoding="utf-8")
+        if not raw_text.strip():
+            return None
+        raw = json.loads(raw_text)
+
         if isinstance(raw, dict) and "portfolios" in raw:
             raw_ports = raw.get("portfolios", {})
             meta = raw.get("_meta", {})
-            logo_src = meta.get("logo_src")
-            config_url = meta.get("config_url")
-            if logo_src:
-                st.session_state.logo_src = logo_src
-            if config_url:
-                st.session_state.config_url = config_url
+            if isinstance(meta, dict):
+                if meta.get("logo_src"):
+                    st.session_state.logo_src = meta.get("logo_src")
+                if meta.get("config_url") is not None:
+                    st.session_state.config_url = meta.get("config_url")
         else:
             raw_ports = raw
+
         loaded: Dict[str, Portfolio] = {}
         for k, v in raw_ports.items():
             loaded[str(k)] = Portfolio(
